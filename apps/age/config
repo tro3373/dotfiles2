@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+install_common() {
+  go_install filippo.io/age/cmd/age@latest
+  go_install filippo.io/age/cmd/age-keygen@latest
+}
