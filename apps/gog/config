@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
 install_arch() {
-  go_install github.com/steipete/gogcli/cmd/gog@latest
+  go_install github.com/openclaw/gogcli/cmd/gog@latest
 }
 setting_common() {
   cat <<'EOF' | inki
 - setup gog
   - build gog for android arm
-    - Modify Makefile in steipete/gogcli and run `make`
+    - Modify Makefile in openclaw/gogcli and run `make`
       - see setup-termux-url-opener/README.md
       - bin/gog file will be generated
       - scp bin/gotg termux:bin
@@ -16,7 +16,9 @@ setting_common() {
       - `gog auth keyring file`
       - or
         ```bash
+        # lint-ignore: uppercase gogcli env var name
         export GOG_KEYRING_BACKEND=file
+        # lint-ignore: uppercase gogcli env var name
         export GOG_KEYRING_PASSWORD=SetPasswordHere
        ```
     - create client secret and download credentials from gcp
