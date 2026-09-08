@@ -89,6 +89,7 @@ alias gre="git_reset"
 alias grr="git_reset -r"
 alias gs="git status"
 alias gn="git_no_merges"
+alias li="linear"
 # alias gt="git tag"
 # alias gt="git_worktree"
 gt() {
