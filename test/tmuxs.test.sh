@@ -21,7 +21,9 @@ tmuxs_bin=$(cd "${script_dir}/../bin" && pwd)/tmuxs
 setup_fake_tmux() {
   fakebin="${tmpdir}/bin"
   mkdir -p "${fakebin}"
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_TMUX_LOG="${tmpdir}/calls.log"
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_STATE_DIR="${tmpdir}/tmuxstate"
   mkdir -p "${FAKE_STATE_DIR}"
   write_fake_tmux
@@ -55,6 +57,15 @@ setup_test_repos() (
   tgit -C "${repos}/super" -c protocol.file.allow=always \
     submodule add -q ../alpha sub
   tgit init -q --bare "${repos}/bare.git"
+  # list のマーク列用。.tasks.md の front matter で done を出し分ける worktree と、
+  # front matter を持たない親リポの .tasks.md (= 印を出さない側)。
+  tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/done" -b brdone
+  tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/undone" -b brundone
+  printf -- '---\ntitle: t\ndone: true\n---\n\n- [ ] rest\n' \
+    >"${repos}/alpha-worktree/done/.tasks.md"
+  printf -- '---\ntitle: t\ndone: false\n---\n' \
+    >"${repos}/alpha-worktree/undone/.tasks.md"
+  printf -- '- [ ] plain\n' >"${repos}/beta/.tasks.md"
 )
 
 # ANSI エスケープだけを落とす (タブ区切りは残す)。
@@ -145,6 +156,7 @@ reset() {
   # tmux.conf 相当: 通常 status-style を seed (band_on がこれを退避し band_off で復元)。
   printf 'bg=colour234,fg=blue,default' >"${FAKE_STATE_DIR}/status-style"
   : >"${FAKE_TMUX_LOG}"
+  # lint-ignore: uppercase tmuxs / tmux が読む env 名は呼ばれる側が決める
   export TMUX_PANE='%5' TMUX='fake' FAKE_PANES='%5'
 }
 
@@ -163,6 +175,7 @@ opt() {
 
 # 1. kill 対象が現在セッション以外: そのまま kill (switch しない)
 test_kill_other_session() {
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_CURRENT=A FAKE_SESSIONS=$'A\nB'
   run_kill 'B:0'
   check 'kill 対象が現在セッション以外: kill-session のみ' \
@@ -171,6 +184,7 @@ test_kill_other_session() {
 
 # 2. kill 対象が現在セッション かつ 他セッション有: switch 後に kill (順序込み)
 test_kill_current_session_with_other() {
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_CURRENT=A FAKE_SESSIONS=$'A\nB'
   run_kill 'A:1'
   check 'kill 対象が現在セッション: switch-client 後に kill-session' \
@@ -179,6 +193,7 @@ test_kill_current_session_with_other() {
 
 # 3. kill 対象が現在セッション かつ 唯一: switch せず kill
 test_kill_only_session() {
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_CURRENT=A FAKE_SESSIONS=$'A'
   run_kill 'A:0'
   check 'kill 対象が唯一セッション: switch せず kill-session' \
@@ -190,6 +205,7 @@ test_kill_only_session() {
 #    (FAKE_SESSIONS: name nwin attached(1 or 空) / FAKE_PANES: session pane_id path)
 test_list_pads_and_marks_attached() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'0\t3\t\n13\t1\t1\n4\t3\t'
   set_fake_panes \
     0 '%1' "${repos}/alpha" \
@@ -206,8 +222,10 @@ test_list_pads_and_marks_attached() {
 # 5. __preview は session の全 window×pane をヘッダ付きで縦積みキャプチャする
 #    (FAKE_PANES はタブ区切り: active widx pidx wname cmd pid、active pane に *)
 test_preview_stacks_panes() {
-  export FAKE_PANES=$'1\t1\t1\tzsh\tclaude\t%0\n0\t1\t2\tzsh\tzsh\t%72\n1\t2\t1\tbash\tbash\t%15' \
-    FAKE_CAPTURE='SCREENDUMP'
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_PANES=$'1\t1\t1\tzsh\tclaude\t%0\n0\t1\t2\tzsh\tzsh\t%72\n1\t2\t1\tbash\tbash\t%15'
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_CAPTURE='SCREENDUMP'
 
   # ANSI(青背景含む)と横幅パディングの末尾空白を除去してテキストだけ検証する。
   local out
@@ -224,6 +242,7 @@ test_cleanup_removes_dead_markers() {
   printf 'idle' >"${TMUXS_MARKER_DIR}/%1"
   printf 'running' >"${TMUXS_MARKER_DIR}/%2"
   printf 'waiting' >"${TMUXS_MARKER_DIR}/%99"
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_PANES=$'%1\n%2'
 
   PATH="${fakebin}:${PATH}" "${tmuxs_bin}" __cleanup
@@ -239,6 +258,7 @@ test_cleanup_removes_dead_markers() {
 #    D は idle のみ。A はマーカー無し(色なし)。
 test_list_state_color_and_sort() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'A\t1\t\nB\t1\t\nC\t1\t\nD\t1\t'
   set_fake_panes \
     A '%1' "${repos}/alpha" \
@@ -268,8 +288,10 @@ test_list_state_color_and_sort() {
 # 8. __preview はマーカー保持 pane のヘッダ帯を状態色に塗る。
 test_preview_state_band() {
   clear_markers
-  export FAKE_PANES=$'1\t1\t1\tzsh\tclaude\t%0\n1\t2\t1\tbash\tbash\t%15' \
-    FAKE_CAPTURE='SCREENDUMP'
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_PANES=$'1\t1\t1\tzsh\tclaude\t%0\n1\t2\t1\tbash\tbash\t%15'
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_CAPTURE='SCREENDUMP'
   printf 'waiting' >"${TMUXS_MARKER_DIR}/%0"
 
   local raw
@@ -286,6 +308,7 @@ test_preview_state_band() {
 #    (FAKE_PANES タブ区切り: window_index pane_id)
 test_switch_focuses_waiting_pane() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_PANES=$'1\t%1\n1\t%2\n2\t%3'
   printf 'running' >"${TMUXS_MARKER_DIR}/%2"
   printf 'waiting' >"${TMUXS_MARKER_DIR}/%3"
@@ -303,6 +326,7 @@ test_switch_focuses_waiting_pane() {
 #     tmux の last-active pane を維持する。
 test_switch_no_waiting_keeps_active() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_PANES=$'1\t%1\n2\t%2'
   printf 'running' >"${TMUXS_MARKER_DIR}/%1"
   printf 'idle' >"${TMUXS_MARKER_DIR}/%2"
@@ -321,6 +345,7 @@ test_switch_no_waiting_keeps_active() {
 #     (no repo) へ集約する。グループはセッション数の多い順。
 test_list_groups_by_repository() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'awt\t1\t\nsolo\t1\t\nbeta\t2\t\nalpha\t1\t1'
   set_fake_panes \
     awt '%1' "${repos}/alpha-worktree/br1" \
@@ -338,6 +363,7 @@ test_list_groups_by_repository() {
 #     セッション数は同数 (各 2) なので、waiting が無ければ名前順で alpha が先。
 test_list_waiting_group_first() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'alpha\t1\t\nawt\t1\t\nbeta\t1\t\nbeta2\t1\t'
   set_fake_panes \
     alpha '%1' "${repos}/alpha" \
@@ -360,6 +386,7 @@ test_list_waiting_group_first() {
 #     幅 20 => インデント 2 + 名前 12 + 区切り 2 + '1w1p' 4。
 test_list_truncates_to_width() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'verylongsessionname\t1\t\nab\t1\t'
   set_fake_panes \
     verylongsessionname '%1' "${repos}/alpha" \
@@ -378,6 +405,7 @@ test_list_truncates_to_width() {
 #     管理外 3 件 vs alpha 1 件。件数だけで並べると管理外が先頭へ浮く。
 test_list_no_repo_group_last() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'a\t1\t\nb\t1\t\nc\t1\t\nz\t1\t'
   set_fake_panes \
     a '%1' "${tmpdir}/plain" \
@@ -395,6 +423,7 @@ test_list_no_repo_group_last() {
 #     bare は親ディレクトリ名になってしまう。
 test_list_repo_name_edge_layouts() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'sm\t1\t\nbr\t1\t'
   set_fake_panes \
     sm '%1' "${repos}/super/sub" \
@@ -409,6 +438,7 @@ test_list_repo_name_edge_layouts() {
 #     '実施してみる' は 6 文字だが表示幅 12。
 test_list_aligns_fullwidth_name() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'ab\t1\t\n実施してみる\t1\t'
   set_fake_panes \
     ab '%1' "${repos}/alpha" \
@@ -424,6 +454,7 @@ test_list_aligns_fullwidth_name() {
 #     切り詰めを文字数で数えると桁が 1 ずれるため、要件 8 と 9 の交差を固定する。
 test_list_truncates_fullwidth_name() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'実施してみるテスト\t1\t\nab\t1\t'
   set_fake_panes \
     実施してみるテスト '%1' "${repos}/alpha" \
@@ -438,6 +469,7 @@ test_list_truncates_fullwidth_name() {
 #     幅 10 だと計算上は 2 桁になるが 8 でクランプし、行は幅を超える。
 test_list_clamps_min_name_width() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'verylongname\t1\t'
   set_fake_panes verylongname '%1' "${repos}/alpha"
 
@@ -450,6 +482,7 @@ test_list_clamps_min_name_width() {
 #     pane のパスで群を決める (最後の pane を採ると beta 群になる)。
 test_list_uses_first_pane_path() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS=$'mix\t1\t'
   set_fake_panes \
     mix '%1' "${repos}/alpha" \
@@ -459,9 +492,26 @@ test_list_uses_first_pane_path() {
     $'\talpha\nmix\t  mix  1w2p' "$(list_plain)"
 }
 
+# 19b. .tasks.md の front matter が done: true のセッションだけ左端に印を出す。
+#      done: false と front matter 無しは 2 桁の空白のままで、桁は揃う。
+test_list_marks_done_task() {
+  clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_SESSIONS=$'wtdone\t1\t\nwtundone\t1\t\nbeta\t1\t'
+  set_fake_panes \
+    wtdone '%1' "${repos}/alpha-worktree/done" \
+    wtundone '%2' "${repos}/alpha-worktree/undone" \
+    beta '%3' "${repos}/beta"
+
+  check 'list: .tasks.md が done: true のセッションにだけ ✅ を出す' \
+    $'\talpha\nwtdone\t\u2705wtdone    1w1p\nwtundone\t  wtundone  1w1p\n\tbeta\nbeta\t  beta      1w1p' \
+    "$(list_plain)"
+}
+
 # 20. セッションが 1 つも無い場合は空出力で正常終了する。
 test_list_empty() {
   clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_SESSIONS='' FAKE_PANES=''
 
   local out rc
@@ -526,6 +576,7 @@ test_indicator_untouched_without_waiting() {
 # 20. 複数 pane が waiting なら件数 N を点灯する。
 test_indicator_counts_multiple() {
   reset
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
   export FAKE_PANES=$'%5\n%6'
   printf 'waiting' >"${TMUXS_MARKER_DIR}/%6" # 別 pane が既に waiting
   run_hook waiting                           # 自分 %5 も waiting => 計 2
@@ -574,12 +625,15 @@ main() {
   trap "rm -rf '${tmpdir}'" EXIT
 
   # 実 marker (XDG_RUNTIME_DIR 配下) を触らないよう一時ディレクトリへ隔離する。
+  # lint-ignore: uppercase tmuxs / tmux が読む env 名は呼ばれる側が決める
   export TMUXS_MARKER_DIR="${tmpdir}/markers"
   mkdir -p "${TMUXS_MARKER_DIR}"
 
   # git 探索が tmpdir より上へ出ないようにし、開発者のグローバル/システム設定
   # (commit.gpgsign, core.hooksPath, init.templateDir 等) も切り離す。
+  # lint-ignore: uppercase git が読む env 名は git が決める
   export GIT_CEILING_DIRECTORIES="${tmpdir}"
+  # lint-ignore: uppercase git が読む env 名は git が決める
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 
   local fakebin
@@ -613,6 +667,7 @@ main() {
   test_list_truncates_fullwidth_name
   test_list_clamps_min_name_width
   test_list_uses_first_pane_path
+  test_list_marks_done_task
   test_list_empty
 
   # イベント/フック系 (各テストは reset で TMUX='fake' / TMUX_PANE='%5' を export)。

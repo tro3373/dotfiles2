@@ -25,9 +25,13 @@ readonly preview_pane_lines=10
 readonly preview_ratio=60
 # fzf がリスト左端に常時確保するポインタ + マーカー列。
 readonly fzf_gutter_cols=2
-# セッション行のインデントと、名前列と右列 (Nw Mp) の間隔。
+# セッション行の左端に置くマーク列の幅と、名前列と右列 (Nw Mp) の間隔。
+# マーク列にはタスク完了印 (done_mark) を置き、印が無い行は同じ幅の空白で埋める。
 readonly list_indent=2
 readonly list_gap=2
+# .tasks.md の front matter が `done: true` のセッションに付ける印。
+# 表示幅 2 桁の絵文字を選ぶこと (マーク列の幅 list_indent と揃える)。
+readonly done_mark='✅'
 # 名前列をこれ以上は削らない下限。
 readonly min_name_cols=8
 # git 管理外のパスのセッションをまとめる見出し。
@@ -186,18 +190,25 @@ list_cols() {
   printf '%s' $((cols * (100 - preview_ratio) / 100 - fzf_gutter_cols))
 }
 
-# pane の作業パスから所属リポジトリ名を求める。git 管理外なら空文字。
+# pane の作業パスから所属リポジトリ名と worktree ルートを求める。
+# リポジトリ名は git 管理外なら空文字、ルートは bare / 管理外なら空文字。
 # --git-common-dir は worktree でも親リポジトリの .git を指すため、
 # worktree のセッションが親リポジトリのグループへ畳まれる。
-# git 呼び出しは path 単位で呼び出し元の rcache へメモ化する。
-repo_of_path() {
-  local -n _rp_out=$1
-  local path=$2 common
-  _rp_out=''
+# --show-toplevel は worktree ごとのルートを返すので .tasks.md の在処になる。
+# bare では toplevel だけが失敗し stdout に common-dir の 1 行しか出ない。
+# 終了コードで捨てず行数で見分ける (bare のグループ分けを壊さない)。
+# git 呼び出しは path 単位で呼び出し元の rcache / tcache へメモ化する。
+git_info_of_path() {
+  local -n _gi_repo=$1 _gi_top=$2
+  local path=$3 common
+  _gi_repo=''
+  _gi_top=''
   [[ -n $path ]] || return 0
   if [[ -z ${rcache[$path]+set} ]]; then
-    common=$(git -C "$path" rev-parse --path-format=absolute \
-      --git-common-dir 2>/dev/null) || common=''
+    local -a out=()
+    mapfile -t out < <(git -C "$path" rev-parse --path-format=absolute \
+      --git-common-dir --show-toplevel 2>/dev/null)
+    common=${out[0]:-}
     common=${common%/}
     # 通常 repo / worktree は '<repo>/.git' なので 1 段上る。
     # submodule は '<super>/.git/modules/<sub>'、bare は '<repo>.git' で
@@ -205,8 +216,31 @@ repo_of_path() {
     [[ ${common##*/} == .git ]] && common=${common%/*}
     common=${common##*/}
     rcache[$path]=${common%.git}
+    tcache[$path]=${out[1]:-}
   fi
-  _rp_out=${rcache[$path]}
+  _gi_repo=${rcache[$path]}
+  _gi_top=${tcache[$path]}
+}
+
+# worktree ルートの .tasks.md を読み front matter が `done: true` かを返す。
+# .tasks.md は tasks store の index.md への symlink。front matter は先頭にあるので
+# 閉じの `---` で読み終える (数百行の index.md 全体は読まない)。
+# 親リポジトリの index.md には front matter が無く、その場合は常に非ゼロ。
+task_is_done() {
+  local root=$1 file line first=1
+  [[ -n $root ]] || return 1
+  file="$root/.tasks.md"
+  [[ -f $file ]] || return 1
+  while IFS= read -r line; do
+    if ((first)); then
+      first=0
+      [[ $line == '---' ]] || return 1
+      continue
+    fi
+    [[ $line == '---' ]] && return 1
+    [[ $line =~ ^done:[[:space:]]*true[[:space:]]*$ ]] && return 0
+  done <"$file"
+  return 1
 }
 
 # 全 pane を一度に列挙し、セッション単位の pane 数・代表状態・作業パスを集める
@@ -241,13 +275,14 @@ collect_session_stats() {
 # collect_session_stats が先に埋めてある。
 # 群内は waiting のセッションを先頭へ寄せ、残りは tmux の列挙順を保つ。
 collect_sessions() {
-  local name nwin attached mark repo
+  local name nwin attached mark repo top
   while IFS=$'\t' read -r name nwin attached; do
     [[ -n $name ]] || continue
     mark=''
     [[ -n $attached ]] && mark=' *'
     sright[$name]="${nwin}w${pcount[$name]:-0}p${mark}"
-    repo_of_path repo "${spath[$name]:-}"
+    git_info_of_path repo top "${spath[$name]:-}"
+    task_is_done "$top" && sdone[$name]=1
     [[ -n $repo ]] || repo=$no_repo_label
     gcount[$repo]=$((${gcount[$repo]:-0} + 1))
     if ((${prank[$name]:-0} == 3)); then
@@ -302,8 +337,10 @@ calc_columns() {
 
 # セッション行を 1 行出力する。1 列目は fzf 用の隠しフィールド (素のセッション名)。
 # 状態色は行全体を囲む前後の SGR として持ち、書式そのものは 1 本に保つ。
+# 左端のマーク列は done_mark (表示幅 2 桁) か同幅の空白。%-*s は文字数で埋めるため
+# 絵文字を混ぜて揃えられない。分岐して埋める。
 print_session_row() {
-  local name=$1 shown sname sgr pre='' post=''
+  local name=$1 shown sname sgr pre='' post='' pad
   fit_disp shown "$name" "$namew"
   case ${prank[$name]:-0} in
     3) sname=waiting ;;
@@ -315,8 +352,10 @@ print_session_row() {
     printf -v pre '\033[%sm' "$sgr"
     post=$'\033[0m'
   fi
-  printf '%s\t%s%*s%s%*s%s%s\n' "$name" "$pre" \
-    "$list_indent" '' "$shown" "$list_gap" '' "${sright[$name]}" "$post"
+  pad=$done_mark
+  [[ -n ${sdone[$name]:-} ]] || printf -v pad '%*s' "$list_indent" ''
+  printf '%s\t%s%s%s%*s%s%s\n' "$name" "$pre" \
+    "$pad" "$shown" "$list_gap" '' "${sright[$name]}" "$post"
 }
 
 # 見出し行 + 配下セッション行を順に出力する。
@@ -340,8 +379,8 @@ print_groups() {
 # 各行は "<hidden>\t<表示>" のタブ区切り。fzf は --with-nth=2 で表示側だけを見せ、
 # {1} で素のセッション名 (preview / kill / switch のターゲット) を取る。
 list_sessions() {
-  local -A pcount=() prank=() spath=() rcache=() \
-  gcount=() waiters=() others=() sright=()
+  local -A pcount=() prank=() spath=() rcache=() tcache=() \
+  gcount=() waiters=() others=() sright=() sdone=()
   local -a ordered=()
   local namew=0
 
@@ -645,6 +684,7 @@ main() {
       cleanup_markers
       # 整形に使う list 幅を子プロセスへ渡す。reload で __list を再実行するときも
       # 同じ幅で揃える必要がある (FZF_COLUMNS は start 時点では 0 で当てにならない)。
+      # lint-ignore: uppercase tmuxs / tmux が読む env 名は呼ばれる側が決める
       TMUXS_LIST_COLS=$(list_cols)
       export TMUXS_LIST_COLS
       # --with-nth=2 で表示は 2 列目 (インデント済みの見出し / セッション行) だけにし、
