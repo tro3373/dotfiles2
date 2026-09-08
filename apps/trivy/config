@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+install_arch() {
+  install_via_os_default
+}
+install_mac() {
+  install_via_os_default
+}
