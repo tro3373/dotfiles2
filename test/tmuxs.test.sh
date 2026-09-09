@@ -57,14 +57,24 @@ setup_test_repos() (
   tgit -C "${repos}/super" -c protocol.file.allow=always \
     submodule add -q ../alpha sub
   tgit init -q --bare "${repos}/bare.git"
-  # list のマーク列用。.tasks.md の front matter で done を出し分ける worktree と、
+  # list のマーク列用。.tasks.md の front matter の status で印を出し分ける worktree と、
   # front matter を持たない親リポの .tasks.md (= 印を出さない側)。
   tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/done" -b brdone
   tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/undone" -b brundone
-  printf -- '---\ntitle: t\ndone: true\n---\n\n- [ ] rest\n' \
+  tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/pr" -b brpr
+  tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/both" -b brboth
+  printf -- '---\ntitle: t\nstatus: \u2705\ufe0f\n---\n\n- [ ] rest\n' \
     >"${repos}/alpha-worktree/done/.tasks.md"
-  printf -- '---\ntitle: t\ndone: false\n---\n' \
+  printf -- '---\ntitle: t\nstatus:\n---\n' \
     >"${repos}/alpha-worktree/undone/.tasks.md"
+  printf -- '---\ntitle: t\nstatus: \U0001F680\n---\n' \
+    >"${repos}/alpha-worktree/pr/.tasks.md"
+  printf -- '---\ntitle: t\nstatus: \U0001F680\u2705\ufe0f\n---\n' \
+    >"${repos}/alpha-worktree/both/.tasks.md"
+  # tasks が書かない値 (単語・印 3 つ) が来ても列幅を超えないことの検証用
+  tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/odd" -b brodd
+  printf -- '---\ntitle: t\nstatus: in progress\n---\n' \
+    >"${repos}/alpha-worktree/odd/.tasks.md"
   printf -- '- [ ] plain\n' >"${repos}/beta/.tasks.md"
 )
 
@@ -216,7 +226,7 @@ test_list_pads_and_marks_attached() {
     4 '%6' "${repos}/alpha"
 
   check 'list 出力: 左寄せ + Nwin Mpane + attach の * (色なし)' \
-    $'\talpha\n0\t  0   3w2p\n13\t  13  1w1p *\n4\t  4   3w3p' "$(list_plain)"
+    $'\talpha\n0\t    0   3w2p\n13\t    13  1w1p *\n4\t    4   3w3p' "$(list_plain)"
 }
 
 # 5. __preview は session の全 window×pane をヘッダ付きで縦積みキャプチャする
@@ -276,7 +286,7 @@ test_list_state_color_and_sort() {
   stripped=$(printf '%s' "${raw}" | strip_ansi)
 
   check 'list: waiting(B) を上位へ並べ替え + 状態集約 (C=running)' \
-    $'\talpha\nB\t  B  1w1p\nA\t  A  1w1p\nC\t  C  1w2p\nD\t  D  1w1p' "${stripped}"
+    $'\talpha\nB\t    B  1w1p\nA\t    A  1w1p\nC\t    C  1w2p\nD\t    D  1w1p' "${stripped}"
   check 'list: B 行に waiting 背景色 (#E5AF1E)' yes \
     "$(printf '%s' "${raw}" | grep -q '48;2;229;175;30' && echo yes || echo no)"
   check 'list: C 行に running 背景色 (#799478)' yes \
@@ -355,7 +365,7 @@ test_list_groups_by_repository() {
     alpha '%5' "${repos}/alpha"
 
   check 'list: repo 見出しでグループ化 (worktree は親へ / 管理外は末尾)' \
-    $'\talpha\nawt\t  awt    1w1p\nalpha\t  alpha  1w1p *\n\tbeta\nbeta\t  beta   2w2p\n\t(no repo)\nsolo\t  solo   1w1p' \
+    $'\talpha\nawt\t    awt    1w1p\nalpha\t    alpha  1w1p *\n\tbeta\nbeta\t    beta   2w2p\n\t(no repo)\nsolo\t    solo   1w1p' \
     "$(list_plain)"
 }
 
@@ -376,7 +386,7 @@ test_list_waiting_group_first() {
   raw=$(run_list)
 
   check 'list: waiting を含む beta 群を最上位へ (群内も waiting 先頭)' \
-    $'\tbeta\nbeta2\t  beta2  1w1p\nbeta\t  beta   1w1p\n\talpha\nalpha\t  alpha  1w1p\nawt\t  awt    1w1p' \
+    $'\tbeta\nbeta2\t    beta2  1w1p\nbeta\t    beta   1w1p\n\talpha\nalpha\t    alpha  1w1p\nawt\t    awt    1w1p' \
     "$(printf '%s' "${raw}" | strip_ansi)"
   check 'list: 見出し行には状態色を付けない (waiting 色はセッション行のみ 1 箇所)' \
     1 "$(printf '%s\n' "${raw}" | grep -c '48;2;229;175;30')"
@@ -395,7 +405,7 @@ test_list_truncates_to_width() {
   local out
   out=$(TMUXS_LIST_COLS=20 list_plain)
   check 'list: 幅超過のセッション名を切り詰め Nw Mp を右端へ収める' \
-    $'\talpha\nverylongsessionname\t  verylongse..  1w1p\nab\t  ab            1w1p' \
+    $'\talpha\nverylongsessionname\t    verylong..  1w1p\nab\t    ab          1w1p' \
     "${out}"
   check 'list: 整形後の行が list 幅 (20) に収まる' 20 \
     "$(printf '%s\n' "${out}" | tail -n1 | cut -f2- | awk '{print length($0)}')"
@@ -414,7 +424,7 @@ test_list_no_repo_group_last() {
     z '%4' "${repos}/alpha"
 
   check 'list: (no repo) は最多件数でも末尾' \
-    $'\talpha\nz\t  z  1w1p\n\t(no repo)\na\t  a  1w1p\nb\t  b  1w1p\nc\t  c  1w1p' \
+    $'\talpha\nz\t    z  1w1p\n\t(no repo)\na\t    a  1w1p\nb\t    b  1w1p\nc\t    c  1w1p' \
     "$(list_plain)"
 }
 
@@ -430,7 +440,7 @@ test_list_repo_name_edge_layouts() {
     br '%2' "${repos}/bare.git"
 
   check 'list: submodule は sub / bare は bare (modules・親ディレクトリ名にしない)' \
-    $'\tbare\nbr\t  br  1w1p\n\tsub\nsm\t  sm  1w1p' \
+    $'\tbare\nbr\t    br  1w1p\n\tsub\nsm\t    sm  1w1p' \
     "$(list_plain)"
 }
 
@@ -445,7 +455,7 @@ test_list_aligns_fullwidth_name() {
     実施してみる '%2' "${repos}/alpha"
 
   check 'list: 全角セッション名を表示幅 12 で数えて桁を揃える' \
-    $'\talpha\nab\t  ab            1w1p\n実施してみる\t  実施してみる  1w1p' \
+    $'\talpha\nab\t    ab            1w1p\n実施してみる\t    実施してみる  1w1p' \
     "$(list_plain)"
 }
 
@@ -461,7 +471,7 @@ test_list_truncates_fullwidth_name() {
     ab '%2' "${repos}/alpha"
 
   check 'list: 全角名を表示幅で切り詰め、余り 1 桁を空白で埋める' \
-    $'\talpha\n実施してみるテスト\t  実施して..   1w1p\nab\t  ab           1w1p' \
+    $'\talpha\n実施してみるテスト\t    実施し..   1w1p\nab\t    ab         1w1p' \
     "$(TMUXS_LIST_COLS=19 list_plain)"
 }
 
@@ -474,7 +484,7 @@ test_list_clamps_min_name_width() {
   set_fake_panes verylongname '%1' "${repos}/alpha"
 
   check 'list: 極小幅でも名前列を 8 桁で止める' \
-    $'\talpha\nverylongname\t  verylo..  1w1p' \
+    $'\talpha\nverylongname\t    verylo..  1w1p' \
     "$(TMUXS_LIST_COLS=10 list_plain)"
 }
 
@@ -489,22 +499,24 @@ test_list_uses_first_pane_path() {
     mix '%2' "${repos}/beta"
 
   check 'list: 群の判定は最初の pane の作業パス' \
-    $'\talpha\nmix\t  mix  1w2p' "$(list_plain)"
+    $'\talpha\nmix\t    mix  1w2p' "$(list_plain)"
 }
 
-# 19b. .tasks.md の front matter が done: true のセッションだけ左端に印を出す。
-#      done: false と front matter 無しは 2 桁の空白のままで、桁は揃う。
-test_list_marks_done_task() {
+# 19b. .tasks.md の front matter の status をそのまま左端のマーク列へ出す。
+#      マーク列は 4 桁固定。印 1 つなら 2 桁分、印なしなら 4 桁分を空白で埋める。
+test_list_marks_task_status() {
   clear_markers
   # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
-  export FAKE_SESSIONS=$'wtdone\t1\t\nwtundone\t1\t\nbeta\t1\t'
+  export FAKE_SESSIONS=$'wtdone\t1\t\nwtundone\t1\t\nwtpr\t1\t\nwtboth\t1\t\nbeta\t1\t'
   set_fake_panes \
     wtdone '%1' "${repos}/alpha-worktree/done" \
     wtundone '%2' "${repos}/alpha-worktree/undone" \
-    beta '%3' "${repos}/beta"
+    wtpr '%3' "${repos}/alpha-worktree/pr" \
+    wtboth '%4' "${repos}/alpha-worktree/both" \
+    beta '%5' "${repos}/beta"
 
-  check 'list: .tasks.md が done: true のセッションにだけ ✅ を出す' \
-    $'\talpha\nwtdone\t\u2705wtdone    1w1p\nwtundone\t  wtundone  1w1p\n\tbeta\nbeta\t  beta      1w1p' \
+  check 'list: status の印をそのまま出し、マーク列 4 桁で桁が揃う' \
+    $'\talpha\nwtdone\t\u2705\ufe0f  wtdone    1w1p\nwtundone\t    wtundone  1w1p\nwtpr\t\U0001F680  wtpr      1w1p\nwtboth\t\U0001F680\u2705\ufe0fwtboth    1w1p\n\tbeta\nbeta\t    beta      1w1p' \
     "$(list_plain)"
 }
 
@@ -615,6 +627,37 @@ test_band_empty_style_restore() {
     '' "$(opt status-style)"
 }
 
+# 19c. status に想定外の値 (単語) が入っても、マーク列 4 桁を超えて桁を崩さない。
+#      %*s は幅が負だと空白を増やす方向に効くため、クランプが無いと右列が押し出される。
+test_list_clamps_unexpected_status() {
+  clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_SESSIONS=$'wtodd\t1\t\nwtdone\t1\t'
+  set_fake_panes \
+    wtodd '%1' "${repos}/alpha-worktree/odd" \
+    wtdone '%2' "${repos}/alpha-worktree/done"
+
+  check 'list: 想定外の status は捨てて 4 桁の空白に収める' \
+    $'\talpha\nwtodd\t    wtodd   1w1p\nwtdone\t\u2705\ufe0f  wtdone  1w1p' \
+    "$(list_plain)"
+}
+
+# 19d. 空白入りセッション名 (手動作成分) でも一覧が壊れない。
+#      nameref の添字へ未クォートで渡すと `sstatus[my` になり invalid variable name で
+#      set -e が一覧ごと落とす。tmuxs は自分が作っていないセッションも列挙する。
+test_list_handles_spaced_session_name() {
+  clear_markers
+  # lint-ignore: uppercase 偽 tmux が読む env 名は fake 側と揃える必要があり小文字化できない
+  export FAKE_SESSIONS=$'my sess\t1\t\nwtdone\t1\t'
+  set_fake_panes \
+    'my sess' '%1' "${repos}/alpha" \
+    wtdone '%2' "${repos}/alpha-worktree/done"
+
+  check 'list: 空白入りセッション名でも一覧が出る' \
+    $'\talpha\nmy sess\t    my sess  1w1p\nwtdone\t\u2705\ufe0f  wtdone   1w1p' \
+    "$(list_plain)"
+}
+
 main() {
   # 各テストを最後まで実行して集計するため、あえて -e は付けない。
   set -uo pipefail
@@ -667,7 +710,9 @@ main() {
   test_list_truncates_fullwidth_name
   test_list_clamps_min_name_width
   test_list_uses_first_pane_path
-  test_list_marks_done_task
+  test_list_marks_task_status
+  test_list_clamps_unexpected_status
+  test_list_handles_spaced_session_name
   test_list_empty
 
   # イベント/フック系 (各テストは reset で TMUX='fake' / TMUX_PANE='%5' を export)。

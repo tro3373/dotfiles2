@@ -2,6 +2,7 @@
 # test: bin/lib/test/tasks
 # ~/.config/tasks/config.env
 
+# pr はここに入れない。`tasks pr` のときだけ要るので pr_task 側で個別に確かめる
 readonly depends=(curl fzf jq tmux git_worktree bat)
 script_dir=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd) && readonly script_dir
 # shellcheck disable=SC1091
@@ -19,8 +20,16 @@ grep_key_reference='^- \[[ xX]\] \[[^]]*\]\(' && readonly grep_key_reference
 grep_key_reference_done='^- \[[xX]\] \[[^]]*\]\(' && readonly grep_key_reference_done
 # 完了マーク (title 接頭辞 / 完了ログ)。complete と split-completed で共用。
 readonly complete_mark="✅️"
+# PR 発行マーク。front matter の status にのみ入る (title には付けない)。
+readonly pr_mark="🚀"
+# status の印の並び。時系列 (PR を出す => 完了する) で固定し、付けた順に依らず
+# この順へ正規化する。tmuxs の一覧はこの値をそのまま左端へ出すので、並びがぶれると
+# 同じ状態のセッションが別の見た目になる。
+readonly status_marks=("$pr_mark" "$complete_mark")
 args=()
 mode=list
+# `pr` サブコマンド以降の引数。tasks 自身は解釈せず pr へ素通しする
+pr_args=()
 comment_type=
 task_file=
 task_index=
@@ -49,6 +58,8 @@ Manage repository tasks.
       -n|--next           : Show Nth task chunk (default 1; also -n2, --next=2)
       -c|--clean          : Record completed task(s) to log and drop them (fzf if no N)
       ok|v|done|complete  : Mark task(s) as completed (fzf if no N)
+      pr [pr args...]     : Run \`pr\` and mark status with ${pr_mark} on success
+                            (everything after \`pr\` is passed through verbatim)
       -m|--comment [type] : Add comment to Nth task (type: requirement|review|complete)
       -a|--add            : Add task from stdin (prepends "- [ ] " if missing)
       -f|--file [path]    : Specify task file to operate on (default: repo .tasks.md)
@@ -102,6 +113,13 @@ initialize() {
         shift && task_file=$1
         ;;
       ok | v | done | complete) mode="complete" ;;
+      pr)
+        # `pr` 以降は全て pr の引数として素通しする。pr が将来どんな option を
+        # 増やしても tasks 側と衝突しない。tasks 自身への option (-f 等) は
+        # `pr` より前に置く: tasks -f <path> pr -d /tmp/pr origin/main
+        mode="pr" && shift && pr_args=("$@")
+        break
+        ;;
       -sp | --spawn) mode="spawn" ;;
       -spc | --spawn-codex) mode="spawn" && spawn_agent="codex" ;;
       --summary) mode="summary" ;;
@@ -183,7 +201,7 @@ expand_log_fmt() { date +"$1"; }
 # 内容日付が判定できないときの reference_log_path のフォールバック先。
 current_log_path() { printf '%s\n' "$store_root/$(expand_log_fmt "$log_fmt")"; }
 
-# YAML front matter を出力 (title, branch, name, parent)。done は常に false。
+# YAML front matter を出力 (title, branch, name, parent)。status は常に空。
 # body は呼び出し側で追記する。front matter スキーマの SSOT。
 emit_front_matter() {
   local title="$1" branch="$2" name="$3" parent="$4"
@@ -191,7 +209,7 @@ emit_front_matter() {
   printf 'title: %s\n' "$title"
   printf 'branch: %s\n' "$branch"
   printf 'name: %s\n' "$name"
-  printf 'done: false\n'
+  printf 'status:\n'
   printf 'parent: %s\n' "$parent"
   printf '%s\n' '---'
   printf '\n'
@@ -470,7 +488,7 @@ replace_task_with_reference() {
 }
 
 # clean 用: 指定行の未 split 完了タスク (- [x] 実ブロック) を split する。
-# ブロックを {ts}_{name}/index.md (done:true) へ移し、関連ファイルを移動し、
+# ブロックを {ts}_{name}/index.md (status: ✅️) へ移し、関連ファイルを移動し、
 # 元リストは first_line に完了参照行 (- [x] [name](path)) を残す。
 split_completed_one() {
   info "==> Splitting LineNo: $line_no.."
@@ -532,7 +550,7 @@ has_tasks() {
 }
 
 has_front_matter() {
-  head -1 "$target_file" | grep -qx -- '---'
+  head -1 "${1:-$target_file}" | grep -qx -- '---'
 }
 
 # front matter から key の値を取得 (file, key)
@@ -646,18 +664,58 @@ complete_task() {
   complete_normal_task
 }
 
-# front matter 持ち index.md を完了状態へ (done:true + title に ✅️)。冪等。
+# status に印が含まれるか。同じ絵文字が VS16 (U+FE0F) 付き / 無しの 2 通りで書かれ、
+# 素の部分一致だと `✅️` を探して `✅` を取り逃がす。両辺から VS16 を落として比べる。
+status_has_mark() {
+  local status=${1//$'️'/} mark=${2//$'️'/}
+  [[ $status == *"$mark"* ]]
+}
+
+# file の status へ mark を足した値を出力する。既にあれば足さない。
+# 並びは status_marks の順に組み直すので、付けた順に依らず同じ値になる。
+# **status_marks に無い文字は落ちる**。status は人が見て手でも触る場所なので、
+# 知らない印を書いても次の complete / pr で消える点に注意。
+build_status_with_mark() {
+  local file="$1" mark="$2" status m out=''
+  status=$(front_matter_value "$file" status)
+  for m in "${status_marks[@]}"; do
+    if [[ $m == "$mark" ]] || status_has_mark "$status" "$m"; then
+      out+=$m
+    fi
+  done
+  printf '%s\n' "$out"
+}
+
+# file の status 行を value へ差し替える。値は絵文字なので sed の置換文字列に
+# 直接埋めず、行番号指定の c コマンドで丸ごと入れ替える (区切り文字の衝突回避)。
+# status 行が無ければ警告して非ゼロ。**黙って落ちない**のが要点で、
+# 呼び出し側が「致命的として die」「印を諦めて続行」を選べるようにする。
+write_front_matter_status() {
+  local file="$1" value="$2" lineno
+  lineno=$(awk '/^status:/{print NR; exit}' "$file")
+  [[ -n $lineno ]] || {
+    warn "==> No 'status:' line in front matter: $file"
+    return 1
+  }
+  local line='status:'
+  [[ -n $value ]] && line="status: ${value}"
+  sed -i "${lineno}c\\
+${line}" "$file"
+}
+
+# front matter 持ち index.md を完了状態へ (status に ✅️ + title に ✅️)。冪等。
 # complete と split-completed が対象ファイルを変えて共用するため引数で受ける。
 mark_front_matter_done() {
   local file="$1"
-  sed -i 's/^done: *false/done: true/' "$file"
+  write_front_matter_status "$file" "$(build_status_with_mark "$file" "$complete_mark")" ||
+    die "==> Cannot mark completion. Add a 'status:' line to the front matter first."
   grep -qE "^title: *${complete_mark}" "$file" ||
     sed -i "s/^title: */&${complete_mark} /" "$file"
 }
 
 # split で生成した index.md (front matter 持ち) の完了処理
 complete_front_matter_task() {
-  if grep -qE '^done: *true' "$target_file"; then
+  if status_has_mark "$(front_matter_value "$target_file" status)" "$complete_mark"; then
     warn "==> Task already marked as completed."
     return 0
   fi
@@ -771,6 +829,37 @@ add_task() {
   printf '%s\n\n' "${input_content}" >>"${target_file}"
 
   info "==> Task added"
+}
+
+# 印を付ける対象の index.md 実体を返す。-f 指定があればそれ、無ければ repo の .tasks.md。
+# 実体が無い / front matter を持たないなら非ゼロ。**リンクを生成しない**のが要点で、
+# タスクを持たないリポジトリで pr を打っただけで store にディレクトリを生やさない。
+pr_status_file() {
+  local file=${task_file:-}
+  [[ -n $file ]] || file="$(git rev-parse --show-toplevel 2>/dev/null)/.tasks.md"
+  file=$(realpath "$file" 2>/dev/null) || return 1
+  [[ -f $file ]] || return 1
+  has_front_matter "$file" || return 1
+  printf '%s\n' "$file"
+}
+
+# pr コマンドをそのまま実行し、成功時だけ status へ 🚀 を足す。
+# pr 側に .tasks.md を知らせないための包み。base の決定・push・PR 発行は pr の担当で、
+# ここは印を付けるためだけに挟まる。pr が失敗したら印は付けない。
+# タスクファイルの有無は PR の可否と無関係なので、無ければ警告だけして PR は通す。
+pr_task() {
+  local file
+  hass pr
+  # pr の終了コードをそのまま返す。die で潰すと呼び出し側が原因を切り分けられない
+  pr "${pr_args[@]}" || exit $?
+  file=$(pr_status_file) || {
+    warn "==> No task file with front matter here. status not marked."
+    return 0
+  }
+  # ここで死なない。PR は既に出ているので、非ゼロで返すと呼び出し側 (pr skill) が
+  # 失敗と解釈して再実行し、PR が二重に立つ
+  write_front_matter_status "$file" "$(build_status_with_mark "$file" "$pr_mark")" || return 0
+  info "==> ${pr_mark} Task status marked as PR created"
 }
 
 summary_task() {
@@ -890,6 +979,13 @@ resolve_target() {
 
 main() {
   initialize "$@"
+
+  # pr はタスクファイルに依存しない。config もリンクも無いリポジトリで PR を出せる
+  # 必要があるので、共通の初期化 (config 読込・リンク生成・存在チェック) を通さない。
+  if [[ $mode == pr ]]; then
+    pr_task
+    return
+  fi
 
   resolve_target
   cd "$git_root" || exit 1

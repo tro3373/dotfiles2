@@ -26,12 +26,15 @@ readonly preview_ratio=60
 # fzf がリスト左端に常時確保するポインタ + マーカー列。
 readonly fzf_gutter_cols=2
 # セッション行の左端に置くマーク列の幅と、名前列と右列 (Nw Mp) の間隔。
-# マーク列にはタスク完了印 (done_mark) を置き、印が無い行は同じ幅の空白で埋める。
-readonly list_indent=2
+# マーク列には .tasks.md の front matter の status をそのまま置き、
+# 足りない分は同じ表示幅の空白で埋める。
+# 印は最大 2 つ (🚀 と ✅️) 並ぶので、絵文字 1 つ 2 桁 x 2 で 4 桁を確保する。
+# 印の絵文字そのものは bin/tasks が決める。ここは値を運ぶだけで対応表を持たない。
+readonly list_indent=4
 readonly list_gap=2
-# .tasks.md の front matter が `done: true` のセッションに付ける印。
-# 表示幅 2 桁の絵文字を選ぶこと (マーク列の幅 list_indent と揃える)。
-readonly done_mark='✅'
+# 印 1 つあたりの表示幅。status の文字数からでなく、含まれる印の個数から
+# 空白の数を出す (✅️ は U+2705 + VS16 の 2 文字だが表示は 2 桁)。
+readonly mark_cols=2
 # 名前列をこれ以上は削らない下限。
 readonly min_name_cols=8
 # git 管理外のパスのセッションをまとめる見出し。
@@ -222,25 +225,33 @@ git_info_of_path() {
   _gi_top=${tcache[$path]}
 }
 
-# worktree ルートの .tasks.md を読み front matter が `done: true` かを返す。
+# worktree ルートの .tasks.md を読み front matter の status の値を nameref へ返す。
 # .tasks.md は tasks store の index.md への symlink。front matter は先頭にあるので
 # 閉じの `---` で読み終える (数百行の index.md 全体は読まない)。
-# 親リポジトリの index.md には front matter が無く、その場合は常に非ゼロ。
-task_is_done() {
-  local root=$1 file line first=1
-  [[ -n $root ]] || return 1
+# 親リポジトリの index.md には front matter が無く、その場合は空を返す。
+task_status() {
+  local -n _ts_out=$1
+  local root=$2 file line first=1
+  _ts_out=''
+  [[ -n $root ]] || return 0
   file="$root/.tasks.md"
-  [[ -f $file ]] || return 1
+  [[ -f $file ]] || return 0
   while IFS= read -r line; do
     if ((first)); then
       first=0
-      [[ $line == '---' ]] || return 1
+      [[ $line == '---' ]] || return 0
       continue
     fi
-    [[ $line == '---' ]] && return 1
-    [[ $line =~ ^done:[[:space:]]*true[[:space:]]*$ ]] && return 0
+    [[ $line == '---' ]] && return 0
+    if [[ $line == status:* ]]; then
+      line=${line#status:}
+      # 前後の空白だけを落とす。値は絵文字なのでここでは中身を解釈しない
+      _ts_out=${line#"${line%%[![:space:]]*}"}
+      _ts_out=${_ts_out%"${_ts_out##*[![:space:]]}"}
+      return 0
+    fi
   done <"$file"
-  return 1
+  return 0
 }
 
 # 全 pane を一度に列挙し、セッション単位の pane 数・代表状態・作業パスを集める
@@ -275,14 +286,15 @@ collect_session_stats() {
 # collect_session_stats が先に埋めてある。
 # 群内は waiting のセッションを先頭へ寄せ、残りは tmux の列挙順を保つ。
 collect_sessions() {
-  local name nwin attached mark repo top
+  local name nwin attached mark repo top st
   while IFS=$'\t' read -r name nwin attached; do
     [[ -n $name ]] || continue
     mark=''
     [[ -n $attached ]] && mark=' *'
     sright[$name]="${nwin}w${pcount[$name]:-0}p${mark}"
     git_info_of_path repo top "${spath[$name]:-}"
-    task_is_done "$top" && sdone[$name]=1
+    task_status st "$top"
+    sstatus[$name]=$st
     [[ -n $repo ]] || repo=$no_repo_label
     gcount[$repo]=$((${gcount[$repo]:-0} + 1))
     if ((${prank[$name]:-0} == 3)); then
@@ -335,10 +347,31 @@ calc_columns() {
   return 0
 }
 
+# status の印を左端のマーク列 (表示幅 list_indent) へ収めた文字列を nameref へ返す。
+# 空白の数は文字数でなく印の個数から出す。%-*s も ${#s} も文字数で数えるので、
+# 絵文字 (1 文字で 2 桁) や VS16 (2 文字目で 0 桁) が混ざると桁が合わない。
+mark_pad() {
+  local -n _mp_out=$1
+  local status=$2 n=0 i
+  for ((i = 0; i < ${#status}; i++)); do
+    # VS16 (U+FE0F) は直前の絵文字の異体字セレクタで、単独では幅を持たない。
+    # 目に見えない文字なのでエスケープで書く (リテラルだと編集で消えても気付けない)
+    [[ ${status:i:1} == $'\ufe0f' ]] && continue
+    # ((n++)) は n=0 のとき評価値 0 => 終了ステータス 1 で set -e に殺される
+    n=$((n + 1))
+  done
+  # 想定より多い印や単語 (`status: in progress` 等) が来ても列幅を超えさせない。
+  # %*s は幅が負だと左寄せ + 絶対値幅として効き、空白を減らすどころか増やす。
+  # 印は捨てて空白で埋める: 桁が崩れると右列ごと画面外へ押し出される
+  ((n * mark_cols > list_indent)) && {
+    status=''
+    n=0
+  }
+  printf -v _mp_out '%s%*s' "$status" $((list_indent - n * mark_cols)) ''
+}
+
 # セッション行を 1 行出力する。1 列目は fzf 用の隠しフィールド (素のセッション名)。
 # 状態色は行全体を囲む前後の SGR として持ち、書式そのものは 1 本に保つ。
-# 左端のマーク列は done_mark (表示幅 2 桁) か同幅の空白。%-*s は文字数で埋めるため
-# 絵文字を混ぜて揃えられない。分岐して埋める。
 print_session_row() {
   local name=$1 shown sname sgr pre='' post='' pad
   fit_disp shown "$name" "$namew"
@@ -352,8 +385,7 @@ print_session_row() {
     printf -v pre '\033[%sm' "$sgr"
     post=$'\033[0m'
   fi
-  pad=$done_mark
-  [[ -n ${sdone[$name]:-} ]] || printf -v pad '%*s' "$list_indent" ''
+  mark_pad pad "${sstatus[$name]:-}"
   printf '%s\t%s%s%s%*s%s%s\n' "$name" "$pre" \
     "$pad" "$shown" "$list_gap" '' "${sright[$name]}" "$post"
 }
@@ -380,7 +412,7 @@ print_groups() {
 # {1} で素のセッション名 (preview / kill / switch のターゲット) を取る。
 list_sessions() {
   local -A pcount=() prank=() spath=() rcache=() tcache=() \
-  gcount=() waiters=() others=() sright=() sdone=()
+  gcount=() waiters=() others=() sright=() sstatus=()
   local -a ordered=()
   local namew=0
 

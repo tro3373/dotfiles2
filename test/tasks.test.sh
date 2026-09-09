@@ -12,9 +12,10 @@
 #       参照行 = - [ ] [dir名](store_root 相対 path)
 #   * split-all: 参照行を再 split せず終了 (無限ループ回帰)
 #   * summary: front matter title 表示
-#   * complete: front matter done:true + title ✅️ + 親参照 [x]
+#   * complete: front matter status: ✅️ + title ✅️ + 親参照 [x]
 #   * complete: 通常サブタスク - [ ] => - [x]
 #   * clean: 完了参照行を log_fmt へ転記 (削除せず残す。done 廃止)
+#   * pr: pr を包んで成功時だけ status へ 🚀 を足す (並びは 🚀✅️ に正規化)
 #
 #   test/tasks   # 全テスト実行
 
@@ -45,6 +46,8 @@ new_env() {
   wt_log="${envdir}/wt.log"
   tmux_log="${envdir}/tmux.log"
   fzf_log="${envdir}/fzf.log"
+  pr_log="${envdir}/pr.log"
+  pr_exit=0
   mkdir -p "${repo}"
   git -C "${repo}" init -q
 }
@@ -69,6 +72,12 @@ write_config_kv() {
 }
 
 # repo 内で bin/tasks を実行。XDG_CONFIG_HOME と LLM 生成 fake を差し替える。
+# run_tasks と同じ環境で終了コードだけを返す (stdout/stderr は捨てる)。
+run_tasks_status() {
+  run_tasks "$@" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+
 run_tasks() {
   (cd "${repo}" &&
     PATH="${fakebin}:${PATH}" \
@@ -78,6 +87,8 @@ run_tasks() {
       FAKE_WT_LOG="${wt_log}" \
       FAKE_TMUX_LOG="${tmux_log}" \
       FAKE_FZF_LOG="${fzf_log}" \
+      FAKE_PR_LOG="${pr_log}" \
+      FAKE_PR_EXIT="${pr_exit:-0}" \
       "${tasks_bin}" "$@") 2>&1
 }
 
@@ -140,7 +151,15 @@ FAKE
 #!/usr/bin/env bash
 cat
 FAKE
-  chmod +x "${fakebin}/git_worktree" "${fakebin}/tmux" "${fakebin}/fzf" "${fakebin}/bat"
+  # fake pr: 引数を記録し、FAKE_PR_EXIT の値で成否を切り替える。
+  # tasks pr は pr の成否だけを見て印を付けるので、PR の中身は再現しない。
+  cat >"${fakebin}/pr" <<'FAKE'
+#!/usr/bin/env bash
+echo "$*" >>"${FAKE_PR_LOG:-/dev/null}"
+exit "${FAKE_PR_EXIT:-0}"
+FAKE
+  chmod +x "${fakebin}/git_worktree" "${fakebin}/tmux" "${fakebin}/fzf" \
+    "${fakebin}/bat" "${fakebin}/pr"
 }
 
 # 1. config の tasks_subdir 配下 {tasks_subdir}/{repo}/index.md に link を生成する
@@ -316,8 +335,8 @@ test_split_creates_dir_and_reference() {
     '1' "$([[ -n ${idx} ]] && grep -qx 'title: Test Title 1' "${idx}" && echo 1 || echo 0)"
   check 'split: front matter has branch' \
     '1' "$([[ -n ${idx} ]] && grep -qx 'branch: feature/test-1' "${idx}" && echo 1 || echo 0)"
-  check 'split: front matter done:false' \
-    '1' "$([[ -n ${idx} ]] && grep -qx 'done: false' "${idx}" && echo 1 || echo 0)"
+  check 'split: front matter status は空' \
+    '1' "$([[ -n ${idx} ]] && grep -qx 'status:' "${idx}" && echo 1 || echo 0)"
   check 'split: body preserved' \
     '1' "$([[ -n ${idx} ]] && grep -qF 'First task body' "${idx}" && echo 1 || echo 0)"
 
@@ -408,7 +427,7 @@ test_spawn_skips_existing_worktree() {
 title: Pre Split
 branch: feature/foo
 name: pre
-done: false
+status:
 parent: ${repo_base}/index.md
 ---
 
@@ -495,7 +514,7 @@ test_summary_reads_front_matter_title() {
 title: My Split Title
 branch: feature/foo
 name: test-task
-done: false
+status:
 parent: /nonexistent/index.md
 ---
 
@@ -508,7 +527,7 @@ EOF
     '1' "$([[ ${out} == *"[My Split Title]"* ]] && echo 1 || echo 0)"
 }
 
-# 9. complete (front matter): done:true + title ✅️ + 親参照 [x] + log 転記
+# 9. complete (front matter): status: ✅️ + title ✅️ + 親参照 [x] + log 転記
 test_complete_front_matter_task() {
   new_env t9 myrepo
   write_config "${base}"
@@ -523,7 +542,7 @@ test_complete_front_matter_task() {
 title: Done Me
 branch: feature/foo
 name: test-task
-done: false
+status:
 parent: ${repo_base}/index.md
 ---
 
@@ -531,8 +550,8 @@ EOF
 
   run_tasks ok -f "${dir}/index.md" >/dev/null 2>&1 || true
 
-  check 'complete-fm: done set true' \
-    '1' "$(grep -qx 'done: true' "${dir}/index.md" && echo 1 || echo 0)"
+  check 'complete-fm: status に ✅️ が入る' \
+    '1' "$(grep -qx 'status: ✅️' "${dir}/index.md" && echo 1 || echo 0)"
   check 'complete-fm: title prefixed with mark' \
     '1' "$(grep -qE '^title: ✅️ Done Me' "${dir}/index.md" && echo 1 || echo 0)"
   check 'complete-fm: parent reference marked [x]' \
@@ -558,7 +577,7 @@ test_complete_front_matter_task_worktree_ref() {
 title: WT Ref
 branch: feature/foo
 name: wt-task
-done: false
+status:
 parent: ${repo_base}/index.md
 ---
 
@@ -572,8 +591,8 @@ EOF
 
   run_tasks ok -f "${dir}/index.md" >/dev/null 2>&1 || true
 
-  check 'complete-fm-wtref: done set true' \
-    '1' "$(grep -qx 'done: true' "${dir}/index.md" && echo 1 || echo 0)"
+  check 'complete-fm-wtref: status に ✅️ が入る' \
+    '1' "$(grep -qx 'status: ✅️' "${dir}/index.md" && echo 1 || echo 0)"
   check 'complete-fm-wtref: worktree-symlink reference marked [x]' \
     '1' "$(grep -qF -- "- [x] [feature-foo](${wt}/.tasks.md)" "${repo_base}/index.md" && echo 1 || echo 0)"
 
@@ -672,8 +691,8 @@ EOF
   idx="${dir}/index.md"
   check 'clean-split: dir は最新 [ts] 20260624-194043 を使う' \
     '1' "$([[ -f ${idx} ]] && echo 1 || echo 0)"
-  check 'clean-split: front matter done:true' \
-    '1' "$([[ -f ${idx} ]] && grep -qx 'done: true' "${idx}" && echo 1 || echo 0)"
+  check 'clean-split: front matter status に ✅️' \
+    '1' "$([[ -f ${idx} ]] && grep -qx 'status: ✅️' "${idx}" && echo 1 || echo 0)"
   check 'clean-split: title に ✅️ 付与' \
     '1' "$([[ -f ${idx} ]] && grep -qE '^title: ✅️ ' "${idx}" && echo 1 || echo 0)"
   check 'clean-split: body 保持' \
@@ -972,7 +991,7 @@ test_log_writes_dated_header() {
 title: One
 branch: feature/one
 name: one
-done: false
+status:
 parent: ${repo_base}/index.md
 ---
 
@@ -982,7 +1001,7 @@ EOF
 title: Two
 branch: feature/two
 name: two
-done: false
+status:
 parent: ${repo_base}/index.md
 ---
 
@@ -1031,6 +1050,246 @@ second line' \
     "$(run_tasks -f "${idx}" --preview-line 4)"
 }
 
+# 14. pr: pr を包み、成功時だけ status へ 🚀 を足す
+# front matter 持ち index.md を worktree の .tasks.md に見立てて -f で直接指す。
+test_pr_marks_status() {
+  new_env t14 myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_prtask"
+  mkdir -p "${dir}"
+  cat >"${dir}/index.md" <<EOF
+---
+title: PR Me
+branch: feature/foo
+name: prtask
+status:
+parent: ${base}/myrepo/index.md
+---
+
+EOF
+
+  run_tasks -f "${dir}/index.md" pr -d /tmp/pr origin/main >/dev/null 2>&1 || true
+
+  check 'pr: status に 🚀 が入る' \
+    '1' "$(grep -qx 'status: 🚀' "${dir}/index.md" && echo 1 || echo 0)"
+  check 'pr: 引数をそのまま pr へ渡す' \
+    '1' "$(grep -qF -- '-d /tmp/pr origin/main' "${pr_log}" 2>/dev/null && echo 1 || echo 0)"
+  check 'pr: tasks 自身の -f は pr へ渡さない' \
+    '0' "$(grep -qF -- '-f ' "${pr_log}" 2>/dev/null && echo 1 || echo 0)"
+}
+
+# 14b. pr: pr が失敗したら status は変えない
+test_pr_failure_keeps_status() {
+  new_env t14b myrepo
+  write_config "${base}"
+  pr_exit=1
+  local dir="${base}/myrepo/20260101-000000_prfail"
+  mkdir -p "${dir}"
+  cat >"${dir}/index.md" <<EOF
+---
+title: PR Fail
+branch: feature/foo
+name: prfail
+status:
+parent: ${base}/myrepo/index.md
+---
+
+EOF
+
+  run_tasks -f "${dir}/index.md" pr origin/main >/dev/null 2>&1 || true
+
+  check 'pr-fail: status は空のまま' \
+    '1' "$(grep -qx 'status:' "${dir}/index.md" && echo 1 || echo 0)"
+}
+
+# 14c. pr: 完了済みへ PR 印を足すと 🚀✅️ の順に正規化する
+test_pr_normalizes_mark_order() {
+  new_env t14c myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_prorder"
+  mkdir -p "${dir}"
+  cat >"${dir}/index.md" <<EOF
+---
+title: PR Order
+branch: feature/foo
+name: prorder
+status: ✅️
+parent: ${base}/myrepo/index.md
+---
+
+EOF
+
+  run_tasks -f "${dir}/index.md" pr origin/main >/dev/null 2>&1 || true
+
+  check 'pr-order: 完了済みへ足すと 🚀✅️ の順になる' \
+    '1' "$(grep -qx 'status: 🚀✅️' "${dir}/index.md" && echo 1 || echo 0)"
+}
+
+# 14d. pr: 同じ印を 2 回足しても重複しない
+test_pr_mark_is_idempotent() {
+  new_env t14d myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_pridem"
+  mkdir -p "${dir}"
+  cat >"${dir}/index.md" <<EOF
+---
+title: PR Idem
+branch: feature/foo
+name: pridem
+status: 🚀
+parent: ${base}/myrepo/index.md
+---
+
+EOF
+
+  run_tasks -f "${dir}/index.md" pr origin/main >/dev/null 2>&1 || true
+
+  check 'pr-idem: 🚀 は 1 つのまま' \
+    '1' "$(grep -qx 'status: 🚀' "${dir}/index.md" && echo 1 || echo 0)"
+}
+
+# 14e. complete: PR 済みを完了すると 🚀✅️ の 2 つが残る
+test_complete_keeps_pr_mark() {
+  new_env t14e myrepo
+  write_config "${base}"
+  local repo_base="${base}/myrepo"
+  local dir="${repo_base}/20260101-000000_prdone"
+  local ref='base/myrepo/20260101-000000_prdone/index.md'
+  mkdir -p "${dir}"
+  printf '%s\n' "- [ ] [20260101-000000_prdone](${ref})" >"${repo_base}/index.md"
+  cat >"${dir}/index.md" <<EOF
+---
+title: PR Done
+branch: feature/foo
+name: prdone
+status: 🚀
+parent: ${repo_base}/index.md
+---
+
+EOF
+
+  run_tasks ok -f "${dir}/index.md" >/dev/null 2>&1 || true
+
+  check 'complete-pr: 🚀 を残したまま ✅️ を足す' \
+    '1' "$(grep -qx 'status: 🚀✅️' "${dir}/index.md" && echo 1 || echo 0)"
+}
+
+# 14f. pr: front matter が無いタスクファイルでは PR だけ実行し印は飛ばす
+test_pr_without_front_matter_warns() {
+  new_env t14f myrepo
+  write_config "${base}"
+  run_tasks --summary >/dev/null 2>&1 || true
+  printf '%s\n' '- [ ] plain task' >>"${base}/myrepo/index.md"
+
+  local out
+  out=$(run_tasks pr origin/main 2>&1 || true)
+
+  check 'pr-nofm: pr は実行する' \
+    '1' "$(grep -qF -- 'origin/main' "${pr_log}" 2>/dev/null && echo 1 || echo 0)"
+  # 'status' だけだと成功メッセージ (Task status marked as PR created) にも当たる
+  check 'pr-nofm: front matter が無い旨を警告する' \
+    '1' "$([[ ${out} == *"No task file with front matter"* ]] && echo 1 || echo 0)"
+}
+
+# 14g. pr: .tasks.md が無いリポジトリでも PR は通し、store にリンクを生やさない
+test_pr_without_tasks_file() {
+  new_env t14g myrepo
+  write_config "${base}"
+
+  local out
+  out=$(run_tasks pr origin/main 2>&1 || true)
+
+  check 'pr-notask: pr は実行する' \
+    '1' "$(grep -qF -- 'origin/main' "${pr_log}" 2>/dev/null && echo 1 || echo 0)"
+  check 'pr-notask: 印を飛ばした旨を警告する' \
+    '1' "$([[ ${out} == *"status not marked"* ]] && echo 1 || echo 0)"
+  # 要点: タスクを持たないリポジトリで pr を打っただけで store を汚さない
+  check 'pr-notask: .tasks.md を生成しない' \
+    '0' "$([[ -e ${repo}/.tasks.md ]] && echo 1 || echo 0)"
+  check 'pr-notask: .tasks を生成しない' \
+    '0' "$([[ -e ${repo}/.tasks ]] && echo 1 || echo 0)"
+  check 'pr-notask: store に repo ディレクトリを作らない' \
+    '0' "$([[ -e ${base}/myrepo ]] && echo 1 || echo 0)"
+}
+
+# 14h. pr: pr の終了コードをそのまま返す (die で 1 に潰さない)
+test_pr_propagates_exit_code() {
+  new_env t14h myrepo
+  write_config "${base}"
+  pr_exit=3
+
+  check 'pr-exit: pr の終了コードをそのまま返す' \
+    '3' "$(run_tasks_status pr origin/main)"
+}
+
+# 14i. complete: status 行が無い front matter は黙って落ちず die する
+test_complete_without_status_line_dies() {
+  new_env t14i myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_nostatus"
+  mkdir -p "${dir}"
+  cat >"${dir}/index.md" <<EOF
+---
+title: No Status
+branch: feature/foo
+name: nostatus
+parent: ${base}/myrepo/index.md
+---
+
+EOF
+
+  local out
+  out=$(run_tasks ok -f "${dir}/index.md" 2>&1 || true)
+
+  check 'complete-nostatus: 無言で終わらせず理由を出す' \
+    '1' "$([[ ${out} == *"status:"* ]] && echo 1 || echo 0)"
+}
+
+# 14j. pr: status 行が無くても PR 発行後は成功で返す (再実行で PR が二重に立たない)
+test_pr_without_status_line_succeeds() {
+  new_env t14j myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_prnostatus"
+  mkdir -p "${dir}"
+  cat >"${dir}/index.md" <<EOF
+---
+title: PR No Status
+branch: feature/foo
+name: prnostatus
+parent: ${base}/myrepo/index.md
+---
+
+EOF
+
+  local out
+  out=$(run_tasks -f "${dir}/index.md" pr origin/main 2>&1 || true)
+
+  check 'pr-nostatus: PR 発行後は成功で返す' \
+    '0' "$(run_tasks_status -f "${dir}/index.md" pr origin/main)"
+  check 'pr-nostatus: pr は実行済み' \
+    '1' "$(grep -qF -- 'origin/main' "${pr_log}" 2>/dev/null && echo 1 || echo 0)"
+  # 成功で返す代わりに、印を付けられなかった理由は必ず出す (無言で飛ばさない)
+  check 'pr-nostatus: status 行が無い旨を警告する' \
+    '1' "$([[ ${out} == *"No 'status:' line"* ]] && echo 1 || echo 0)"
+}
+
+# 14k. pr: VS16 無しの ✅ でも完了印を取り違えず、🚀 を足すだけにする
+test_pr_keeps_vs16less_complete_mark() {
+  new_env t14k myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_vs16less"
+  mkdir -p "${dir}"
+  # status は人が手でも書く場所。VS16 (U+FE0F) 無しの ✅ が来ても完了印として扱う
+  printf -- '---\ntitle: T\nbranch: b\nname: vs16less\nstatus: \u2705\nparent: %s\n---\n\n' \
+    "${base}/myrepo/index.md" >"${dir}/index.md"
+
+  run_tasks -f "${dir}/index.md" pr origin/main >/dev/null 2>&1 || true
+
+  # 出力は正規形 (VS16 付き) に揃う。要点は完了印が消えないこと
+  check 'pr-vs16less: 完了印を消さず 🚀 を前に足す' \
+    '1' "$(grep -qx "status: $(printf '\U0001F680\u2705\ufe0f')" "${dir}/index.md" && echo 1 || echo 0)"
+}
+
 main() {
   set -uo pipefail
   tmproot=$(mktemp -d)
@@ -1074,6 +1333,17 @@ main() {
   test_clean_worktree_excludes_done_reference
   test_log_writes_dated_header
   test_preview_line_block_and_ref
+  test_pr_marks_status
+  test_pr_failure_keeps_status
+  test_pr_normalizes_mark_order
+  test_pr_mark_is_idempotent
+  test_complete_keeps_pr_mark
+  test_pr_without_front_matter_warns
+  test_pr_without_tasks_file
+  test_pr_propagates_exit_code
+  test_complete_without_status_line_dies
+  test_pr_without_status_line_succeeds
+  test_pr_keeps_vs16less_complete_mark
 
   printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
   [[ ${fail} -eq 0 ]]
