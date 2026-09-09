@@ -703,14 +703,14 @@ write_front_matter_status() {
 ${line}" "$file"
 }
 
-# front matter 持ち index.md を完了状態へ (status に ✅️ + title に ✅️)。冪等。
+# front matter 持ち index.md を完了状態へ (status に ✅️)。冪等。
 # complete と split-completed が対象ファイルを変えて共用するため引数で受ける。
+# title には印を付けない。状態を持つのは status だけで、title と二重に持たない
+# (二重だと片方の直し忘れで食い違い、どちらが正かが決まらなくなる)。
 mark_front_matter_done() {
   local file="$1"
   write_front_matter_status "$file" "$(build_status_with_mark "$file" "$complete_mark")" ||
     die "==> Cannot mark completion. Add a 'status:' line to the front matter first."
-  grep -qE "^title: *${complete_mark}" "$file" ||
-    sed -i "s/^title: */&${complete_mark} /" "$file"
 }
 
 # split で生成した index.md (front matter 持ち) の完了処理
@@ -720,7 +720,7 @@ complete_front_matter_task() {
     return 0
   fi
   mark_front_matter_done "$target_file"
-  info "==> ${complete_mark} Task title marked as completed"
+  info "==> ${complete_mark} Task status marked as completed"
   grep -E '^title:' "$target_file" | head -1
   mark_parent_reference_done
 }
@@ -864,12 +864,15 @@ pr_task() {
 
 summary_task() {
   task_dir_name=$(basename "$git_root")
-  # front matter の title を概要として表示
-  local title task_summary
+  # git_worktree の一覧ラベルになる 1 行。front matter の status の印と title を出す。
+  # 印が無いときに空白を足すとラベルの桁が揃わないので、あるときだけ足す。
+  local title status task_summary mark=
   title=$(front_matter_value "$target_file" title)
+  status=$(front_matter_value "$target_file" status)
+  [[ -n $status ]] && mark=" ${status}"
   task_summary=
   [[ -n $title ]] && task_summary=" [${title}]"
-  echo "$task_dir_name$task_summary"
+  echo "$task_dir_name$mark$task_summary"
 }
 
 # branch に対応する既存 worktree の絶対パスを返す (無ければ空)。

@@ -552,8 +552,9 @@ EOF
 
   check 'complete-fm: status に ✅️ が入る' \
     '1' "$(grep -qx 'status: ✅️' "${dir}/index.md" && echo 1 || echo 0)"
-  check 'complete-fm: title prefixed with mark' \
-    '1' "$(grep -qE '^title: ✅️ Done Me' "${dir}/index.md" && echo 1 || echo 0)"
+  # 状態は status が持つ。title へ二重に書かない
+  check 'complete-fm: title に印を付けない' \
+    '1' "$(grep -qx 'title: Done Me' "${dir}/index.md" && echo 1 || echo 0)"
   check 'complete-fm: parent reference marked [x]' \
     '1' "$(grep -qF -- "- [x] [20260101-000000_test-task](${ref})" "${repo_base}/index.md" && echo 1 || echo 0)"
 
@@ -693,8 +694,8 @@ EOF
     '1' "$([[ -f ${idx} ]] && echo 1 || echo 0)"
   check 'clean-split: front matter status に ✅️' \
     '1' "$([[ -f ${idx} ]] && grep -qx 'status: ✅️' "${idx}" && echo 1 || echo 0)"
-  check 'clean-split: title に ✅️ 付与' \
-    '1' "$([[ -f ${idx} ]] && grep -qE '^title: ✅️ ' "${idx}" && echo 1 || echo 0)"
+  check 'clean-split: title に印を付けない' \
+    '0' "$([[ -f ${idx} ]] && grep -qE '^title: ✅️ ' "${idx}" && echo 1 || echo 0)"
   check 'clean-split: body 保持' \
     '1' "$([[ -f ${idx} ]] && grep -qF 'did the thing' "${idx}" && echo 1 || echo 0)"
   check 'clean-split: 実装ノート HTML を split 先へ移動' \
@@ -1290,6 +1291,32 @@ test_pr_keeps_vs16less_complete_mark() {
     '1' "$(grep -qx "status: $(printf '\U0001F680\u2705\ufe0f')" "${dir}/index.md" && echo 1 || echo 0)"
 }
 
+# 8b. summary: git_worktree の一覧ラベルへ status の印を出す。
+#     印が無いときに余分な空白を残さない (ラベルが揃わなくなる)。
+test_summary_shows_status_mark() {
+  new_env t8b myrepo
+  write_config "${base}"
+  local dir="${base}/myrepo/20260101-000000_sum"
+  mkdir -p "${dir}"
+
+  emit_index() {
+    printf -- '---\ntitle: T\nbranch: b\nname: sum\nstatus: %s\nparent: /nonexistent/index.md\n---\n' \
+      "$1" >"${dir}/index.md"
+  }
+
+  emit_index "$(printf '\U0001F680')"
+  check 'summary: PR のみは 🚀 を出す' \
+    "20260101-000000_sum $(printf '\U0001F680') [T]" "$(run_tasks --summary -f "${dir}/index.md")"
+
+  emit_index "$(printf '\U0001F680\u2705\ufe0f')"
+  check 'summary: PR + 完了は 2 つとも出す' \
+    "20260101-000000_sum $(printf '\U0001F680\u2705\ufe0f') [T]" "$(run_tasks --summary -f "${dir}/index.md")"
+
+  emit_index ''
+  check 'summary: 印が無ければ空白を足さない' \
+    '20260101-000000_sum [T]' "$(run_tasks --summary -f "${dir}/index.md")"
+}
+
 main() {
   set -uo pipefail
   tmproot=$(mktemp -d)
@@ -1316,6 +1343,7 @@ main() {
   test_spawn_codex_sends_codex_command
   test_split_multi_select_all
   test_summary_reads_front_matter_title
+  test_summary_shows_status_mark
   test_complete_front_matter_task
   test_complete_front_matter_task_worktree_ref
   test_complete_normal_task
