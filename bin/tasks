@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test: bin/lib/test/tasks
+# test: test/tasks.test.sh
 # ~/.config/tasks/config.env
 
 # pr はここに入れない。`tasks pr` のときだけ要るので pr_task 側で個別に確かめる
