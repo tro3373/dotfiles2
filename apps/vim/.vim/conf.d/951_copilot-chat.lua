@@ -368,23 +368,23 @@ _G.copilot_chat_setup = function()
       --   },
     },
   })
-  -- auto_insert_mode = false の代わり。チャットウィンドウに入った時だけ insert に入る。
-  -- 応答生成中はバッファが modifiable=false になる(Chat:start)ので、その間は入らない。
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group = vim.api.nvim_create_augroup("copilot_chat_auto_insert", { clear = true }),
-    pattern = "copilot-chat", -- バッファ名(nvim_buf_set_name で 'copilot-chat')
-    callback = function(ev)
-      vim.schedule(function()
-        if vim.api.nvim_get_current_buf() ~= ev.buf then
-          return
-        end
-        if not vim.bo[ev.buf].modifiable then
-          return
-        end
-        vim.cmd("startinsert")
-      end)
-    end,
-  })
+  -- -- auto_insert_mode = false の代わり。チャットウィンドウに入った時だけ insert に入る。
+  -- -- 応答生成中はバッファが modifiable=false になる(Chat:start)ので、その間は入らない。
+  -- vim.api.nvim_create_autocmd("BufEnter", {
+  --   group = vim.api.nvim_create_augroup("copilot_chat_auto_insert", { clear = true }),
+  --   pattern = "copilot-chat", -- バッファ名(nvim_buf_set_name で 'copilot-chat')
+  --   callback = function(ev)
+  --     vim.schedule(function()
+  --       if vim.api.nvim_get_current_buf() ~= ev.buf then
+  --         return
+  --       end
+  --       if not vim.bo[ev.buf].modifiable then
+  --         return
+  --       end
+  --       vim.cmd("startinsert")
+  --     end)
+  --   end,
+  -- })
   -- vim.api.nvim_create_autocmd("FileType", {
   --   pattern = "copilot-chat",
   --   callback = function()
