@@ -1,5 +1,49 @@
 #!/usr/bin/env bash
 
+# sops: YAML/JSON/dotenv を「値だけ」暗号化する。キー名と構造は平文のまま残るので
+# git diff が読める。ファイル丸ごと暗号化する git-crypt との違いはここ。
+# 鍵は age を使う (KMS/PGP も使えるが、ローカル完結なら age が一番軽い)。
+
 install_common() {
   go_install github.com/getsops/sops/v3/cmd/sops@latest
+}
+
+setting_common() {
+  cat <<'EOF' | inki
+- 鍵を作る (age。未導入なら `setup age`)
+  ```sh
+  mkdir -p ~/.config/sops/age
+  age-keygen -o ~/.config/sops/age/keys.txt
+  # 公開鍵 (age1...) を後で .sops.yaml に書く。秘密鍵は git に入れない
+  age-keygen -y ~/.config/sops/age/keys.txt
+  ```
+  - `~/.config/sops/age/keys.txt` は sops の既定の探索先。env は要らない
+  - identity の探索順は SOPS_AGE_SSH_PRIVATE_KEY_FILE, SOPS_AGE_SSH_PRIVATE_KEY_CMD,
+    ~/.ssh/id_ed25519, SOPS_AGE_KEY, SOPS_AGE_KEY_FILE, SOPS_AGE_KEY_CMD
+  - 別マシンへ渡すときは秘密鍵をコピーするか `SOPS_AGE_KEY_FILE=/path/keys.txt`
+- リポジトリ直下に .sops.yaml を置く (どのパスをどの鍵で暗号化するかの SSOT)
+  ```yaml
+  creation_rules:
+    - path_regex: \.enc\.(ya?ml|json|env)$
+      age: age1xxxxxxxx...
+  ```
+  - これがあれば `sops encrypt` に `-a` を渡さなくていい
+  - 複数人なら `age:` にカンマ区切りで公開鍵を並べる
+- 使う
+  ```sh
+  sops encrypt -i secrets.enc.yaml   # 平文をその場で暗号化
+  sops decrypt secrets.enc.yaml      # 標準出力へ復号 (-i でファイル書き戻し)
+  sops edit secrets.enc.yaml         # 復号 -> $EDITOR -> 保存時に再暗号化
+  sops filestatus secrets.enc.yaml   # 暗号化済みかの判定
+  ```
+  - 拡張子で入出力形式を決める。stdin から入れるなら `--filename-override` で名前を教える
+- アプリへ渡す (復号ファイルをディスクに残さない)
+  ```sh
+  sops exec-env secrets.enc.env 'terraform apply'   # 値を環境変数として注入
+  sops exec-file secrets.enc.yaml 'cmd {}'          # 一時ファイルとして渡す
+  ```
+- 鍵を足す / 抜く
+  - .sops.yaml の `age:` を直してから `sops updatekeys secrets.enc.yaml`
+  - creation_rules は**新規作成時のみ**効く。既存ファイルは updatekeys しないと変わらない
+EOF
 }
