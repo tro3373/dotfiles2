@@ -1,50 +1,25 @@
 #!/usr/bin/env bash
 
-install_common() { not_supported; }
 install_arch() {
   install_via_os_default
 }
-install_msys() { not_supported; }
-install_cygwin() { not_supported; }
 install_mac() {
   install_via_os_default
 }
-install_ubuntu() { not_supported; }
-install_redhat() { not_supported; }
-# setting_common() {
-#   local _workzsh=$HOME/.works.zsh
-#   if grep direnv $_workzsh >&/dev/null; then
-#     return
-#   fi
-#   log "adding to $_workzsh.."
-#   # shellcheck disable=SC2016
-#   echo 'eval "$(direnv hook zsh)"' |
-#     if is_dry; then
-#       cat -
-#     else
-#       cat - | tee -a $_workzsh
-#     fi
-# }
-# setting_arch() { no_settings; }
-setting_msys() { no_settings; }
-setting_cygwin() { no_settings; }
-setting_mac() { no_settings; }
-setting_ubuntu() { no_settings; }
-setting_redhat() { no_settings; }
-#is_installed
-#install_via_os_default
-#def_install
-#is_debug
-#is_dry
-#log
-#dlog
-#not_supported
-#make_link_dot2home
-#make_lnk_with_bkup
-#cd_work
-#make_work_if_needed
-#dl
-#dl_unzip
-#dl_untar
-#github
-#github_user_local
+setting_common() {
+  tips
+}
+tips() {
+  cat <<'EOF' | inki
+
+- 特定の置き場を信頼する。
+  - ~/.config/direnv/direnv.toml
+    ```toml
+    [whitelist]
+    prefix = [
+      "/path/to/your/repo-1",
+      "/path/to/your/repo-2",
+    ]
+    ```
+EOF
+}

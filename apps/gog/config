@@ -4,6 +4,9 @@ install_arch() {
   go_install github.com/openclaw/gogcli/cmd/gog@latest
 }
 setting_common() {
+  tips
+}
+tips() {
   cat <<'EOF' | inki
 - setup gog
   - build gog for android arm
