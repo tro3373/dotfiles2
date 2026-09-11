@@ -106,7 +106,6 @@ bind generic -      ?git checkout -
 
 # T で tag
 bind main    T ?git tag "%(prompt Enter tag name: )" %(commit)
-bind refs    T ?git tag "%(prompt Enter tag name: )" %(branch)
 
 # B でブランチを作成してそのブランチに移動 (checkout -b)
 bind main    B      ?git checkout -b "%(prompt Enter branch name: )" %(branch)
@@ -164,8 +163,8 @@ bind diff    P      ?git cherry-pick %(commit)
 bind main    <Esc>k ?git cherry-pick -n %(commit)
 bind diff    <Esc>k ?git cherry-pick -n %(commit)
 
-# D でブランチを削除 (マージ済みブランチのみ. 強制削除(branch -D) は `!`) (refs-view)
-bind refs    D      ?git branch -d %(branch)
+# D でタグ行ならタグを、ブランチ行ならブランチを削除 (マージ済みブランチのみ. 強制削除(branch -D) は `!`) (refs-view)
+bind refs    D      ?sh -c "if [ -n '%(tag)' ]; then git tag -d '%(tag)'; else git branch -d '%(branch)'; fi"
 # D でトラッキングされていないファイルを削除 (status-view)
 bind status  D      ?git clean -d -f -- %(file)
 # D で stash を削除 (`!` と同じ) (stash-view)
