@@ -849,9 +849,8 @@ pr_status_file() {
 # タスクファイルの有無は PR の可否と無関係なので、無ければ警告だけして PR は通す。
 pr_task() {
   local file
-  hass pr
   # pr の終了コードをそのまま返す。die で潰すと呼び出し側が原因を切り分けられない
-  pr "${pr_args[@]}" || exit $?
+  "$script_dir"/pr "${pr_args[@]}" || exit $?
   file=$(pr_status_file) || {
     warn "==> No task file with front matter here. status not marked."
     return 0
