@@ -29,7 +29,7 @@ install_arch() {
   # - dl_gh_release install gh command to /usr/local/bin
   # - /usr/local/bin is higher priority than /usr/bin, so dl_gh_release is used to install latest version.
   def_install github-cli
-  install_common
+  # install_common
 }
 install_msys() { not_supported; }
 install_cygwin() { not_supported; }
