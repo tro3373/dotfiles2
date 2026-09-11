@@ -69,7 +69,7 @@ setup_test_repos() (
     >"${repos}/alpha-worktree/undone/.tasks.md"
   printf -- '---\ntitle: t\nstatus: \U0001F680\n---\n' \
     >"${repos}/alpha-worktree/pr/.tasks.md"
-  printf -- '---\ntitle: t\nstatus: \U0001F680\u2705\ufe0f\n---\n' \
+  printf -- '---\ntitle: t\nstatus: \u2705\ufe0f\U0001F680\n---\n' \
     >"${repos}/alpha-worktree/both/.tasks.md"
   # tasks が書かない値 (単語・印 3 つ) が来ても列幅を超えないことの検証用
   tgit -C "${repos}/alpha" worktree add -q "${repos}/alpha-worktree/odd" -b brodd
@@ -516,7 +516,7 @@ test_list_marks_task_status() {
     beta '%5' "${repos}/beta"
 
   check 'list: status の印をそのまま出し、マーク列 4 桁で桁が揃う' \
-    $'\talpha\nwtdone\t\u2705\ufe0f  wtdone    1w1p\nwtundone\t    wtundone  1w1p\nwtpr\t\U0001F680  wtpr      1w1p\nwtboth\t\U0001F680\u2705\ufe0fwtboth    1w1p\n\tbeta\nbeta\t    beta      1w1p' \
+    $'\talpha\nwtdone\t  \u2705\ufe0fwtdone    1w1p\nwtundone\t    wtundone  1w1p\nwtpr\t  \U0001F680wtpr      1w1p\nwtboth\t\u2705\ufe0f\U0001F680wtboth    1w1p\n\tbeta\nbeta\t    beta      1w1p' \
     "$(list_plain)"
 }
 
@@ -638,7 +638,7 @@ test_list_clamps_unexpected_status() {
     wtdone '%2' "${repos}/alpha-worktree/done"
 
   check 'list: 想定外の status は捨てて 4 桁の空白に収める' \
-    $'\talpha\nwtodd\t    wtodd   1w1p\nwtdone\t\u2705\ufe0f  wtdone  1w1p' \
+    $'\talpha\nwtodd\t    wtodd   1w1p\nwtdone\t  \u2705\ufe0fwtdone  1w1p' \
     "$(list_plain)"
 }
 
@@ -654,7 +654,7 @@ test_list_handles_spaced_session_name() {
     wtdone '%2' "${repos}/alpha-worktree/done"
 
   check 'list: 空白入りセッション名でも一覧が出る' \
-    $'\talpha\nmy sess\t    my sess  1w1p\nwtdone\t\u2705\ufe0f  wtdone   1w1p' \
+    $'\talpha\nmy sess\t    my sess  1w1p\nwtdone\t  \u2705\ufe0fwtdone   1w1p' \
     "$(list_plain)"
 }
 

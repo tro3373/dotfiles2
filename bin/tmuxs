@@ -27,8 +27,8 @@ readonly preview_ratio=60
 readonly fzf_gutter_cols=2
 # セッション行の左端に置くマーク列の幅と、名前列と右列 (Nw Mp) の間隔。
 # マーク列には .tasks.md の front matter の status をそのまま置き、
-# 足りない分は同じ表示幅の空白で埋める。
-# 印は最大 2 つ (🚀 と ✅️) 並ぶので、絵文字 1 つ 2 桁 x 2 で 4 桁を確保する。
+# 足りない分は同じ表示幅の空白を左に埋めて右詰めにする。
+# 印は最大 2 つ (✅️ と 🚀) 並ぶので、絵文字 1 つ 2 桁 x 2 で 4 桁を確保する。
 # 印の絵文字そのものは bin/tasks が決める。ここは値を運ぶだけで対応表を持たない。
 readonly list_indent=4
 readonly list_gap=2
@@ -367,7 +367,7 @@ mark_pad() {
     status=''
     n=0
   }
-  printf -v _mp_out '%s%*s' "$status" $((list_indent - n * mark_cols)) ''
+  printf -v _mp_out '%*s%s' $((list_indent - n * mark_cols)) '' "$status"
 }
 
 # セッション行を 1 行出力する。1 列目は fzf 用の隠しフィールド (素のセッション名)。

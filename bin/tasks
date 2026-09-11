@@ -22,10 +22,10 @@ grep_key_reference_done='^- \[[xX]\] \[[^]]*\]\(' && readonly grep_key_reference
 readonly complete_mark="✅️"
 # PR 発行マーク。front matter の status にのみ入る (title には付けない)。
 readonly pr_mark="🚀"
-# status の印の並び。時系列 (PR を出す => 完了する) で固定し、付けた順に依らず
+# status の印の並び。完了 => PR の順で固定し、付けた順に依らず
 # この順へ正規化する。tmuxs の一覧はこの値をそのまま左端へ出すので、並びがぶれると
 # 同じ状態のセッションが別の見た目になる。
-readonly status_marks=("$pr_mark" "$complete_mark")
+readonly status_marks=("$complete_mark" "$pr_mark")
 args=()
 mode=list
 # `pr` サブコマンド以降の引数。tasks 自身は解釈せず pr へ素通しする

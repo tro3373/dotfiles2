@@ -15,7 +15,7 @@
 #   * complete: front matter status: ✅️ + title ✅️ + 親参照 [x]
 #   * complete: 通常サブタスク - [ ] => - [x]
 #   * clean: 完了参照行を log_fmt へ転記 (削除せず残す。done 廃止)
-#   * pr: pr を包んで成功時だけ status へ 🚀 を足す (並びは 🚀✅️ に正規化)
+#   * pr: pr を包んで成功時だけ status へ 🚀 を足す (並びは ✅️🚀 に正規化)
 #
 #   test/tasks   # 全テスト実行
 
@@ -1103,7 +1103,7 @@ EOF
     '1' "$(grep -qx 'status:' "${dir}/index.md" && echo 1 || echo 0)"
 }
 
-# 14c. pr: 完了済みへ PR 印を足すと 🚀✅️ の順に正規化する
+# 14c. pr: 完了済みへ PR 印を足すと ✅️🚀 の順に正規化する
 test_pr_normalizes_mark_order() {
   new_env t14c myrepo
   write_config "${base}"
@@ -1122,8 +1122,8 @@ EOF
 
   run_tasks -f "${dir}/index.md" pr origin/main >/dev/null 2>&1 || true
 
-  check 'pr-order: 完了済みへ足すと 🚀✅️ の順になる' \
-    '1' "$(grep -qx 'status: 🚀✅️' "${dir}/index.md" && echo 1 || echo 0)"
+  check 'pr-order: 完了済みへ足すと ✅️🚀 の順になる' \
+    '1' "$(grep -qx 'status: ✅️🚀' "${dir}/index.md" && echo 1 || echo 0)"
 }
 
 # 14d. pr: 同じ印を 2 回足しても重複しない
@@ -1149,7 +1149,7 @@ EOF
     '1' "$(grep -qx 'status: 🚀' "${dir}/index.md" && echo 1 || echo 0)"
 }
 
-# 14e. complete: PR 済みを完了すると 🚀✅️ の 2 つが残る
+# 14e. complete: PR 済みを完了すると ✅️🚀 の 2 つが残る
 test_complete_keeps_pr_mark() {
   new_env t14e myrepo
   write_config "${base}"
@@ -1172,7 +1172,7 @@ EOF
   run_tasks ok -f "${dir}/index.md" >/dev/null 2>&1 || true
 
   check 'complete-pr: 🚀 を残したまま ✅️ を足す' \
-    '1' "$(grep -qx 'status: 🚀✅️' "${dir}/index.md" && echo 1 || echo 0)"
+    '1' "$(grep -qx 'status: ✅️🚀' "${dir}/index.md" && echo 1 || echo 0)"
 }
 
 # 14f. pr: front matter が無いタスクファイルでは PR だけ実行し印は飛ばす
@@ -1287,8 +1287,8 @@ test_pr_keeps_vs16less_complete_mark() {
   run_tasks -f "${dir}/index.md" pr origin/main >/dev/null 2>&1 || true
 
   # 出力は正規形 (VS16 付き) に揃う。要点は完了印が消えないこと
-  check 'pr-vs16less: 完了印を消さず 🚀 を前に足す' \
-    '1' "$(grep -qx "status: $(printf '\U0001F680\u2705\ufe0f')" "${dir}/index.md" && echo 1 || echo 0)"
+  check 'pr-vs16less: 完了印を消さず 🚀 を後ろに足す' \
+    '1' "$(grep -qx "status: $(printf '\u2705\ufe0f\U0001F680')" "${dir}/index.md" && echo 1 || echo 0)"
 }
 
 # 8b. summary: git_worktree の一覧ラベルへ status の印を出す。
@@ -1308,9 +1308,9 @@ test_summary_shows_status_mark() {
   check 'summary: PR のみは 🚀 を出す' \
     "20260101-000000_sum $(printf '\U0001F680') [T]" "$(run_tasks --summary -f "${dir}/index.md")"
 
-  emit_index "$(printf '\U0001F680\u2705\ufe0f')"
+  emit_index "$(printf '\u2705\ufe0f\U0001F680')"
   check 'summary: PR + 完了は 2 つとも出す' \
-    "20260101-000000_sum $(printf '\U0001F680\u2705\ufe0f') [T]" "$(run_tasks --summary -f "${dir}/index.md")"
+    "20260101-000000_sum $(printf '\u2705\ufe0f\U0001F680') [T]" "$(run_tasks --summary -f "${dir}/index.md")"
 
   emit_index ''
   check 'summary: 印が無ければ空白を足さない' \
