@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+# カレントに .sops.yaml を生成する。
+# 受け取り手は自分の age 公開鍵 + 引数で渡した公開鍵 (複数人で使う時)。
+#
+#   gen_sops_yaml [age1...]...
+
+dst=.sops.yaml
+
+error() { echo "$*" >&2 && exit 1; }
+
+main() {
+  set -euo pipefail
+  local key_file=${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}
+  [[ -e $dst ]] && error "Already exists. $dst"
+  [[ -f $key_file ]] || error "No age key. $key_file (see: setup sops)"
+  local recipients r
+  recipients=$(age-keygen -y "$key_file" | paste -sd, -)
+  for r in "$@"; do
+    [[ $r == age1* ]] || error "Not an age public key. $r"
+    recipients+=",$r"
+  done
+
+  cat <<EOF >"$dst"
+creation_rules:
+  - path_regex: \.enc\.(ya?ml|json|env)$
+    age: $recipients
+EOF
+  echo "Done. $dst generated."
+}
+main "$@"

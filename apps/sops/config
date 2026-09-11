@@ -9,7 +9,17 @@ install_common() {
 }
 
 setting_common() {
+  tips
+}
+
+tips() {
   cat <<'EOF' | inki
+- 仕組み
+  1. sops がランダムな「データ鍵」を 1 つ作り、値 (PASS=...)
+     をそのデータ鍵で暗号化する。値の暗号文は 1 つだけ。
+  2. そのデータ鍵を、A の公開鍵で暗号化したものと、B の公開鍵で暗号化したものの 2
+     つを作り、ファイルの末尾に並べて保存する。
+  3. 復号するときは、自分の秘密鍵で自分宛てのデータ鍵を取り出し、そのデータ鍵で値を戻す。
 - 鍵を作る (age。未導入なら `setup age`)
   ```sh
   mkdir -p ~/.config/sops/age
@@ -22,13 +32,14 @@ setting_common() {
     ~/.ssh/id_ed25519, SOPS_AGE_KEY, SOPS_AGE_KEY_FILE, SOPS_AGE_KEY_CMD
   - 別マシンへ渡すときは秘密鍵をコピーするか `SOPS_AGE_KEY_FILE=/path/keys.txt`
 - リポジトリ直下に .sops.yaml を置く (どのパスをどの鍵で暗号化するかの SSOT)
-  ```yaml
-  creation_rules:
-    - path_regex: \.enc\.(ya?ml|json|env)$
-      age: age1xxxxxxxx...
+  ```sh
+  gen_sops_yaml              # *.enc.{yaml,yml,json,env} を自分の公開鍵で暗号化するルールを書く
+  gen_sops_yaml age1yyy...   # 他人の公開鍵も足す
   ```
   - これがあれば `sops encrypt` に `-a` を渡さなくていい
   - 複数人なら `age:` にカンマ区切りで公開鍵を並べる
+  - `path_regex` は渡したファイルに使う鍵を選ぶだけ。.sops.yaml の場所からの相対パスで照合する
+  - どのルールにも当たらないと、`-a` を付けても失敗する
 - 使う
   ```sh
   sops encrypt -i secrets.enc.yaml   # 平文をその場で暗号化
@@ -36,7 +47,13 @@ setting_common() {
   sops edit secrets.enc.yaml         # 復号 -> $EDITOR -> 保存時に再暗号化
   sops filestatus secrets.enc.yaml   # 暗号化済みかの判定
   ```
+  - `sops encrypt` は 1 回 1 ファイル。.sops.yaml に当たるファイルをまとめて暗号化する機能はない
+    (パスを省くと stdin 扱いになり `must specify --filename-override` で終わる)
   - 拡張子で入出力形式を決める。stdin から入れるなら `--filename-override` で名前を教える
+    - 知っている形式は `.yaml` `.yml` `.json` `.env` (dotenv) `.ini`
+    - それ以外 (`.txt` `.toml` `.pass` 等) は binary 扱い。中身丸ごとを `{"data": "ENC[...]"}` の JSON に包む
+    - binary 扱いは暗号化済みを見分けられず、2 回 `-i` すると二重暗号化になる (yaml 等はエラーで止まる)。
+      パスワード 1 つでも `.enc.env` (`PASS=...`) にしておく
 - アプリへ渡す (復号ファイルをディスクに残さない)
   ```sh
   sops exec-env secrets.enc.env 'terraform apply'   # 値を環境変数として注入
