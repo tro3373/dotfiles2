@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
 main() {
-  bunx @schpet/linear-cli "$@"
+  bunx @schpet/linear-cli@2.6.0 "$@"
 }
 main "$@"
